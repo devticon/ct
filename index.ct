@@ -2,7 +2,7 @@ import {
   deployment,
   ingress,
   service,
-} from "https://github.com/cloudticon/k8s@master";
+} from "github.com/cloudticon/k8s@master";
 
 type HasuraOpts = {
   name: string;
