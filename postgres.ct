@@ -1,11 +1,19 @@
 import { env } from "github.com/cloudticon/k8s-factories@master";
 import { postgres as basePostgres } from "./apps-cloudticon-com/v1alpha1.ts";
 
-export const postgres = (args: Parameters<typeof basePostgres>[0]) => {
+type PostgresArgs = Omit<Parameters<typeof basePostgres>[0], "secret"> & {
+  secret?: string;
+};
+
+export const postgres = (args: PostgresArgs) => {
+  const secret = args.secret ?? "db";
   return {
-    ...basePostgres(args),
+    ...basePostgres({
+      ...args,
+      secret,
+    }),
     envUrl() {
-      return env.secret(args.secret, "endpoint");
+      return env.secret(secret, "endpoint");
     },
   };
 };
