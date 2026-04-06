@@ -1,3 +1,4 @@
+export { env, vol } from "github.com/cloudticon/k8s-factories@master";
 export { app, hasura, projectSecrets } from "./apps-cloudticon-com/v1alpha1.ts";
 export { postgres } from "./postgres.ct";
 export { infisicalSecrets } from "./secrets.ct";
