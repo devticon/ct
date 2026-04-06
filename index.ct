@@ -1,43 +1,4 @@
-import {
-  deployment,
-  ingress,
-  service,
-} from "github.com/cloudticon/k8s@master";
-
-type HasuraOpts = {
-  name: string;
-  version: string;
-};
-
-export const hasura = function (opts: HasuraOpts) {
-  const deploy = deployment({
-    name: opts.name,
-    image: "hasura/graphql-engine:" + opts.version,
-    ports: [{ containerPort: 8080 }],
-  });
-
-  const serv = service({
-    name: opts.name + "-svc",
-    selector: { app: deploy.metadata.name },
-    ports: [{ port: 80, targetPort: 8080 }],
-  });
-
-  const ing = ingress({
-    name: opts.name + "-ing",
-    rules: [
-      {
-        host: opts.name + ".example.com",
-        paths: [
-          {
-            path: "/",
-            pathType: "Prefix",
-            serviceName: serv.metadata.name,
-            servicePort: 80,
-          },
-        ],
-      },
-    ],
-  });
-
-  return { deploy, service: serv, ingress: ing };
-};
+export { app, hasura, projectSecrets } from "./apps-cloudticon-com/v1alpha1.ts";
+export { postgres } from "./postgres.ct";
+export { infisicalSecrets } from "./secrets.ct";
+export { expose, webApp } from "./webapp.ct";

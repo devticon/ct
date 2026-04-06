@@ -1,0 +1,11 @@
+import { env } from "github.com/cloudticon/k8s-factories@master";
+import { postgres as basePostgres } from "./apps-cloudticon-com/v1alpha1.ts";
+
+export const postgres = (args: Parameters<typeof basePostgres>[0]) => {
+  return {
+    ...basePostgres(args),
+    envUrl() {
+      return env.secret(args.secret, "endpoint");
+    },
+  };
+};

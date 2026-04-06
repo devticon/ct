@@ -1,0 +1,29 @@
+import { createFactory } from "github.com/cloudticon/k8s-factories@master";
+
+export const { webApp, expose } = createFactory({
+  networking: {
+    type: "istio",
+    gateway: "default/default",
+    tls: {
+      issuer: "letsencrypt-prod",
+      createCertificate: false,
+      createGateway: false,
+    },
+  },
+  resourcePresets: {
+    small: {
+      requests: { cpu: "50m", memory: "64Mi" },
+      limits: { cpu: "200m", memory: "128Mi" },
+    },
+  },
+  webApp: {
+    defaults: {
+      replicas: 2,
+      probes: "/health",
+      resources: "medium",
+    },
+  },
+  expose: {
+    defaults: {},
+  },
+});
