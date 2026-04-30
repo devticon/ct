@@ -5,6 +5,7 @@ import {
 } from "github.com/cloudticon/k8s@master/resources/networking-istio-io/v1beta1";
 
 interface CustomGatewayArgs {
+  enabled?: boolean;
   host: string;
   httpsRedirect: boolean;
   issuer?: string;
@@ -15,6 +16,8 @@ interface CustomGatewayArgs {
 // dedicated gateway alongside the cluster-default `default/default`.
 // Default issuer is letsencrypt-cf-prod (DNS-01 with Cloudflare).
 export const customGateway = (args: CustomGatewayArgs) => {
+  if (args.enabled === false) return;
+
   certificate({
     name: args.host,
     namespace: "istio-system",
@@ -47,6 +50,7 @@ export const customGateway = (args: CustomGatewayArgs) => {
 };
 
 interface SingleHostRouteArgs {
+  enabled?: boolean;
   name: string;
   host: string;
   serviceHost: string;
@@ -59,6 +63,8 @@ interface SingleHostRouteArgs {
 // `default/default` gateway by default; opt in to `custom` via flag, or
 // override fully with `gateways`.
 export const singleHostRoute = (args: SingleHostRouteArgs) => {
+  if (args.enabled === false) return;
+
   const gateways = args.gateways ?? [
     "default/default",
     ...(args.customGateway ? ["custom"] : []),
@@ -83,4 +89,41 @@ export const singleHostRoute = (args: SingleHostRouteArgs) => {
       },
     ],
   } as any);
+};
+
+type CustomGatewayOpts = Omit<CustomGatewayArgs, "host" | "enabled">;
+
+interface RouteArgs {
+  enabled?: boolean;
+  name: string;
+  host: string;
+  serviceHost: string;
+  servicePort: number;
+  customGateway?: false | CustomGatewayOpts;
+  gateways?: string[];
+}
+
+// Bundle: VirtualService + optional dedicated Istio Gateway/cert. Pass an
+// object to `customGateway` to spin one up alongside `default/default`; pass
+// `false` (or omit) to use only `default/default`.
+export const route = (args: RouteArgs) => {
+  if (args.enabled === false) return;
+
+  const useCustom = args.customGateway && args.customGateway !== false;
+
+  singleHostRoute({
+    name: args.name,
+    host: args.host,
+    serviceHost: args.serviceHost,
+    servicePort: args.servicePort,
+    customGateway: !!useCustom,
+    gateways: args.gateways,
+  });
+
+  if (useCustom) {
+    customGateway({
+      host: args.host,
+      ...(args.customGateway as CustomGatewayOpts),
+    });
+  }
 };

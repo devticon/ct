@@ -1,6 +1,7 @@
 import { job } from "github.com/cloudticon/k8s@master/resources/batch/v1";
 
-interface DbMigrationJobArgs {
+export interface DbMigrationJobArgs {
+  enabled?: boolean;
   name: string;
   image: string;
   tag: string;
@@ -20,6 +21,8 @@ interface DbMigrationJobArgs {
 // Default env injects DATABASE_URL from `dbSecret` (defaults to db/endpoint).
 // Pass `env` to add or replace the env block.
 export const dbMigrationJob = (args: DbMigrationJobArgs) => {
+  if (args.enabled === false) return;
+
   const tagShort = String(args.tag).slice(0, 12);
   const dbSecret = args.dbSecret ?? { name: "db", key: "endpoint" };
   const containerEnv = args.env ?? [

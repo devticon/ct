@@ -1,19 +1,38 @@
 import { env } from "github.com/cloudticon/k8s-factories@master";
 import { postgres as basePostgres } from "./apps-cloudticon-com/v1alpha1.ts";
+import { dbMigrationJob, type DbMigrationJobArgs } from "./migration.ct";
+
+type DbMigrationOpts = Omit<DbMigrationJobArgs, "name" | "dbSecret"> & {
+  name?: string;
+};
 
 type PostgresArgs = Omit<Parameters<typeof basePostgres>[0], "secret"> & {
   secret?: string;
+  enabled?: boolean;
+  migration?: DbMigrationOpts;
 };
 
-export const postgres = (args: PostgresArgs) => {
+export interface PostgresHandle {
+  envUrl(): ReturnType<typeof env.secret> | undefined;
+}
+
+export const postgres = (args: PostgresArgs): PostgresHandle => {
+  const enabled = args.enabled !== false;
   const secret = args.secret ?? "db";
+  if (!enabled) return { envUrl: () => undefined };
+
+  const { enabled: _e, migration, ...rest } = args;
+  basePostgres({ ...rest, secret });
+
+  if (migration) {
+    dbMigrationJob({
+      ...migration,
+      name: migration.name ?? `${args.name}-db-migrate`,
+      dbSecret: { name: secret, key: "endpoint" },
+    });
+  }
+
   return {
-    ...basePostgres({
-      ...args,
-      secret,
-    }),
-    envUrl() {
-      return env.secret(secret, "endpoint");
-    },
+    envUrl: () => env.secret(secret, "endpoint"),
   };
 };

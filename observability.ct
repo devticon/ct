@@ -13,6 +13,7 @@ const serviceMonitorCR = resource(
 );
 
 interface ServiceMonitorArgs {
+  enabled?: boolean;
   name: string;
   appLabel: string;
   port: string;
@@ -27,6 +28,8 @@ interface ServiceMonitorArgs {
 // `prometheus-kube-prometheus` because that's the kube-prometheus-stack
 // release name on every Devticon cluster.
 export const prometheusServiceMonitor = (args: ServiceMonitorArgs) => {
+  if (args.enabled === false) return;
+
   return serviceMonitorCR({
     name: args.name,
     labels: {
@@ -52,6 +55,7 @@ interface DashboardEntry {
 }
 
 interface GrafanaDashboardsArgs {
+  enabled?: boolean;
   app: string;
   instanceLabel: string;
   dashboards: DashboardEntry[];
@@ -63,6 +67,8 @@ interface GrafanaDashboardsArgs {
 // true because the Grafana CR lives in `monitoring`, while dashboards ship in
 // the project namespace (default flipped to false in Grafana Operator v5).
 export const grafanaDashboards = (args: GrafanaDashboardsArgs) => {
+  if (args.enabled === false) return;
+
   const baseSpec = {
     allowCrossNamespaceImport: args.allowCrossNamespaceImport ?? true,
     instanceSelector: { matchLabels: { dashboards: args.instanceLabel } },
@@ -80,6 +86,7 @@ export const grafanaDashboards = (args: GrafanaDashboardsArgs) => {
 };
 
 interface OtelEnvArgs {
+  enabled?: boolean;
   serviceName: string;
   endpoint: string;
   serviceVersion: string;
@@ -92,9 +99,11 @@ interface OtelEnvArgs {
 }
 
 // Builds the OTEL_* env block for OpenTelemetry-instrumented apps. Spread the
-// returned object into webApp().env. Empty/undefined optional fields are
-// omitted so the resulting env keeps only what's set.
+// returned object into workload().env. Empty/undefined optional fields are
+// omitted so the resulting env keeps only what's set. Returns {} when disabled.
 export const otelEnv = (args: OtelEnvArgs): Record<string, string> => {
+  if (args.enabled === false) return {};
+
   const out: Record<string, string> = {
     OTEL_SERVICE_NAME: args.serviceName,
     OTEL_EXPORTER_OTLP_ENDPOINT: args.endpoint,
@@ -113,4 +122,65 @@ export const otelEnv = (args: OtelEnvArgs): Record<string, string> => {
     out.GRAFANA_TEMPO_BASE_URL = args.grafanaTempoBaseUrl;
   }
   return out;
+};
+
+type ServiceMonitorOpts = Omit<ServiceMonitorArgs, "name" | "appLabel"> & {
+  name?: string;
+  appLabel?: string;
+};
+type DashboardsOpts = Omit<
+  GrafanaDashboardsArgs,
+  "app" | "dashboards"
+> & { app?: string; entries: DashboardEntry[] };
+
+interface ObservabilityArgs extends OtelEnvArgs {
+  app?: string;
+  serviceMonitor?: ServiceMonitorOpts;
+  dashboards?: DashboardsOpts;
+}
+
+export interface ObservabilityHandle {
+  env: Record<string, string>;
+}
+
+// Bundle: OTEL env + Prometheus ServiceMonitor + Grafana dashboards. Spread
+// `obs.env` into workload().env. Each sub-section has its own `enabled` toggle;
+// when the top-level `enabled` is false, no env is emitted and no CRs created.
+export const observability = (
+  args: ObservabilityArgs,
+): ObservabilityHandle => {
+  if (args.enabled === false) return { env: {} };
+
+  const app = args.app ?? args.serviceName;
+
+  if (args.serviceMonitor) {
+    prometheusServiceMonitor({
+      ...args.serviceMonitor,
+      name: args.serviceMonitor.name ?? app,
+      appLabel: args.serviceMonitor.appLabel ?? app,
+    });
+  }
+
+  if (args.dashboards) {
+    const { entries, app: dashApp, ...dashOpts } = args.dashboards;
+    grafanaDashboards({
+      ...dashOpts,
+      app: dashApp ?? app,
+      dashboards: entries,
+    });
+  }
+
+  return {
+    env: otelEnv({
+      serviceName: args.serviceName,
+      endpoint: args.endpoint,
+      serviceVersion: args.serviceVersion,
+      deploymentEnv: args.deploymentEnv,
+      protocol: args.protocol,
+      tracesSampler: args.tracesSampler,
+      tracesSamplerArg: args.tracesSamplerArg,
+      resourceAttributes: args.resourceAttributes,
+      grafanaTempoBaseUrl: args.grafanaTempoBaseUrl,
+    }),
+  };
 };

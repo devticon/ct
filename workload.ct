@@ -1,0 +1,92 @@
+import { createFactory } from "github.com/cloudticon/k8s-factories@master";
+import type {
+  FactoryExposeConfig,
+  FactoryWebAppConfig,
+} from "github.com/cloudticon/k8s-factories@master/types.ct";
+
+const factory = createFactory({
+  networking: {
+    type: "istio",
+    gateway: "default/default",
+    tls: {
+      issuer: "letsencrypt-prod",
+      createCertificate: false,
+      createGateway: false,
+    },
+  },
+  resourcePresets: {
+    small: {
+      requests: { cpu: "50m", memory: "64Mi" },
+      limits: { cpu: "200m", memory: "128Mi" },
+    },
+    medium: {
+      requests: { cpu: "100m", memory: "128Mi" },
+      limits: { cpu: "500m", memory: "256Mi" },
+    },
+    large: {
+      requests: { cpu: "200m", memory: "256Mi" },
+      limits: { cpu: "1000m", memory: "512Mi" },
+    },
+  },
+  webApp: {
+    defaults: {
+      replicas: 2,
+      probes: "/health",
+      resources: "medium",
+    },
+  },
+  expose: {
+    defaults: {},
+  },
+});
+
+type EnvVal = NonNullable<FactoryWebAppConfig["env"]>[string] | false;
+
+export interface WorkloadArgs extends Omit<FactoryWebAppConfig, "env"> {
+  enabled?: boolean;
+  env?: Record<string, EnvVal>;
+}
+
+export interface WorkloadHandle {
+  name: string;
+  port?: number;
+  url(scheme?: string): string | undefined;
+}
+
+// Generic Deployment + Service factory. Replaces `webApp` (kept as deprecated
+// alias). Extras over base: `enabled` toggle, `env` drops undefined/false
+// entries (no more conditional spreads), and a `url(scheme?)` helper that
+// returns the in-cluster address — or undefined when disabled / portless.
+export const workload = (args: WorkloadArgs): WorkloadHandle => {
+  const enabled = args.enabled !== false;
+  const handle: WorkloadHandle = {
+    name: args.name,
+    port: args.port,
+    url(scheme?: string) {
+      if (!enabled || args.port == null) return undefined;
+      const hostPort = `${args.name}:${args.port}`;
+      return scheme ? `${scheme}://${hostPort}` : hostPort;
+    },
+  };
+  if (!enabled) return handle;
+
+  const { enabled: _e, env, ...rest } = args;
+  const cleanEnv = env
+    ? (Object.fromEntries(
+        Object.entries(env).filter(([, v]) => v !== undefined && v !== false),
+      ) as FactoryWebAppConfig["env"])
+    : undefined;
+
+  factory.webApp({ ...rest, ...(cleanEnv && { env: cleanEnv }) });
+  return handle;
+};
+
+export interface ExposeArgs extends FactoryExposeConfig {
+  enabled?: boolean;
+}
+
+export const expose = (args: ExposeArgs) => {
+  if (args.enabled === false) return;
+  const { enabled: _e, ...rest } = args;
+  return factory.expose(rest as FactoryExposeConfig);
+};
