@@ -1,0 +1,116 @@
+import { resource } from "github.com/cloudticon/k8s@master";
+
+const grafanaDashboardCR = resource(
+  "grafana.integreatly.org/v1beta1",
+  "GrafanaDashboard",
+  { spec: {} },
+);
+
+const serviceMonitorCR = resource(
+  "monitoring.coreos.com/v1",
+  "ServiceMonitor",
+  { spec: {} },
+);
+
+interface ServiceMonitorArgs {
+  name: string;
+  appLabel: string;
+  port: string;
+  path?: string;
+  interval?: string;
+  scrapeTimeout?: string;
+  honorLabels?: boolean;
+  release?: string;
+}
+
+// Prometheus ServiceMonitor scraping a Service port. `release` defaults to
+// `prometheus-kube-prometheus` because that's the kube-prometheus-stack
+// release name on every Devticon cluster.
+export const prometheusServiceMonitor = (args: ServiceMonitorArgs) => {
+  return serviceMonitorCR({
+    name: args.name,
+    labels: {
+      app: args.appLabel,
+      release: args.release ?? "prometheus-kube-prometheus",
+    },
+    selector: { matchLabels: { app: args.appLabel } },
+    endpoints: [
+      {
+        port: args.port,
+        path: args.path ?? "/metrics",
+        interval: args.interval ?? "30s",
+        scrapeTimeout: args.scrapeTimeout ?? "10s",
+        honorLabels: args.honorLabels ?? false,
+      },
+    ],
+  } as any);
+};
+
+interface DashboardEntry {
+  id: string;
+  json: unknown;
+}
+
+interface GrafanaDashboardsArgs {
+  app: string;
+  instanceLabel: string;
+  dashboards: DashboardEntry[];
+  resyncPeriod?: string;
+  allowCrossNamespaceImport?: boolean;
+}
+
+// Batch-create GrafanaDashboard CRs. allowCrossNamespaceImport defaults to
+// true because the Grafana CR lives in `monitoring`, while dashboards ship in
+// the project namespace (default flipped to false in Grafana Operator v5).
+export const grafanaDashboards = (args: GrafanaDashboardsArgs) => {
+  const baseSpec = {
+    allowCrossNamespaceImport: args.allowCrossNamespaceImport ?? true,
+    instanceSelector: { matchLabels: { dashboards: args.instanceLabel } },
+    resyncPeriod: args.resyncPeriod ?? "5m",
+  };
+
+  for (const d of args.dashboards) {
+    grafanaDashboardCR({
+      name: `${args.app}-${d.id}`,
+      labels: { app: args.app, dashboard: d.id },
+      ...baseSpec,
+      json: JSON.stringify(d.json, null, 2),
+    } as any);
+  }
+};
+
+interface OtelEnvArgs {
+  serviceName: string;
+  endpoint: string;
+  serviceVersion: string;
+  deploymentEnv: string;
+  protocol?: "grpc" | "http/protobuf";
+  tracesSampler?: string;
+  tracesSamplerArg?: string;
+  resourceAttributes?: string;
+  grafanaTempoBaseUrl?: string;
+}
+
+// Builds the OTEL_* env block for OpenTelemetry-instrumented apps. Spread the
+// returned object into webApp().env. Empty/undefined optional fields are
+// omitted so the resulting env keeps only what's set.
+export const otelEnv = (args: OtelEnvArgs): Record<string, string> => {
+  const out: Record<string, string> = {
+    OTEL_SERVICE_NAME: args.serviceName,
+    OTEL_EXPORTER_OTLP_ENDPOINT: args.endpoint,
+    OTEL_EXPORTER_OTLP_PROTOCOL: args.protocol ?? "grpc",
+    OTEL_SERVICE_VERSION: args.serviceVersion,
+  };
+  if (args.tracesSampler) out.OTEL_TRACES_SAMPLER = args.tracesSampler;
+  if (args.tracesSamplerArg) {
+    out.OTEL_TRACES_SAMPLER_ARG = args.tracesSamplerArg;
+  }
+  const extraAttrs = args.resourceAttributes
+    ? `,${args.resourceAttributes}`
+    : "";
+  out.OTEL_RESOURCE_ATTRIBUTES = `deployment.environment=${args.deploymentEnv}${extraAttrs}`;
+  if (args.grafanaTempoBaseUrl) {
+    out.GRAFANA_TEMPO_BASE_URL = args.grafanaTempoBaseUrl;
+  }
+  return out;
+};

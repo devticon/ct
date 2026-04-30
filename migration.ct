@@ -1,0 +1,54 @@
+import { job } from "github.com/cloudticon/k8s@master/resources/batch/v1";
+
+interface DbMigrationJobArgs {
+  name: string;
+  image: string;
+  tag: string;
+  command: string[];
+  imagePullSecrets?: string[];
+  dbSecret?: { name: string; key: string };
+  env?: Array<{ name: string; value?: string; valueFrom?: any }>;
+  backoffLimit?: number;
+  activeDeadlineSeconds?: number;
+  ttlSecondsAfterFinished?: number;
+}
+
+// Helm hooks (post-install/post-upgrade) have no ct equivalent. This factory
+// re-runs the migration whenever the image tag changes by suffixing the Job
+// name with the short tag — old completed Jobs are GC'd by ttlSecondsAfterFinished.
+//
+// Default env injects DATABASE_URL from `dbSecret` (defaults to db/endpoint).
+// Pass `env` to add or replace the env block.
+export const dbMigrationJob = (args: DbMigrationJobArgs) => {
+  const tagShort = String(args.tag).slice(0, 12);
+  const dbSecret = args.dbSecret ?? { name: "db", key: "endpoint" };
+  const containerEnv = args.env ?? [
+    {
+      name: "DATABASE_URL",
+      valueFrom: { secretKeyRef: dbSecret },
+    },
+  ];
+
+  return job({
+    name: `${args.name}-${tagShort}`,
+    backoffLimit: args.backoffLimit ?? 3,
+    activeDeadlineSeconds: args.activeDeadlineSeconds ?? 120,
+    ttlSecondsAfterFinished: args.ttlSecondsAfterFinished ?? 300,
+    template: {
+      spec: {
+        restartPolicy: "Never",
+        imagePullSecrets: (args.imagePullSecrets ?? []).map((n: string) => ({
+          name: n,
+        })),
+        containers: [
+          {
+            name: "migrate",
+            image: args.image,
+            command: args.command,
+            env: containerEnv,
+          },
+        ],
+      },
+    },
+  } as any);
+};

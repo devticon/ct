@@ -3,3 +3,10 @@ export { app, hasura, projectSecrets } from "./apps-cloudticon-com/v1alpha1.ts";
 export { postgres } from "./postgres.ct";
 export { infisicalSecrets } from "./secrets.ct";
 export { expose, webApp } from "./webapp.ct";
+export { customGateway, singleHostRoute } from "./gateway.ct";
+export { dbMigrationJob } from "./migration.ct";
+export {
+  grafanaDashboards,
+  otelEnv,
+  prometheusServiceMonitor,
+} from "./observability.ct";

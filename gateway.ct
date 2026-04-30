@@ -1,0 +1,86 @@
+import { certificate } from "github.com/cloudticon/k8s@master/resources/cert-manager-io/v1";
+import {
+  gateway,
+  virtualService,
+} from "github.com/cloudticon/k8s@master/resources/networking-istio-io/v1beta1";
+
+interface CustomGatewayArgs {
+  host: string;
+  httpsRedirect: boolean;
+  issuer?: string;
+  selector?: Record<string, string>;
+}
+
+// Custom Istio Gateway + cert-manager Certificate for projects that need a
+// dedicated gateway alongside the cluster-default `default/default`.
+// Default issuer is letsencrypt-cf-prod (DNS-01 with Cloudflare).
+export const customGateway = (args: CustomGatewayArgs) => {
+  certificate({
+    name: args.host,
+    namespace: "istio-system",
+    dnsNames: [args.host, `*.${args.host}`],
+    issuerRef: {
+      group: "cert-manager.io",
+      kind: "ClusterIssuer",
+      name: args.issuer ?? "letsencrypt-cf-prod",
+    },
+    secretName: args.host,
+  } as any);
+
+  gateway({
+    name: "custom",
+    annotations: { "argocd.argoproj.io/sync-wave": "-100" },
+    selector: args.selector ?? { app: "istio-gateway" },
+    servers: [
+      {
+        hosts: [args.host, `*.${args.host}`],
+        port: { name: "http", number: 80, protocol: "HTTP" },
+        tls: { httpsRedirect: args.httpsRedirect },
+      },
+      {
+        hosts: [args.host, `*.${args.host}`],
+        port: { name: "https", number: 443, protocol: "HTTPS" },
+        tls: { credentialName: args.host, mode: "SIMPLE" },
+      },
+    ],
+  } as any);
+};
+
+interface SingleHostRouteArgs {
+  name: string;
+  host: string;
+  serviceHost: string;
+  servicePort: number;
+  customGateway?: boolean;
+  gateways?: string[];
+}
+
+// VirtualService routing all `/` traffic to one Service. Uses
+// `default/default` gateway by default; opt in to `custom` via flag, or
+// override fully with `gateways`.
+export const singleHostRoute = (args: SingleHostRouteArgs) => {
+  const gateways = args.gateways ?? [
+    "default/default",
+    ...(args.customGateway ? ["custom"] : []),
+  ];
+
+  return virtualService({
+    name: args.name,
+    gateways,
+    hosts: [args.host],
+    http: [
+      {
+        match: [{ uri: { prefix: "/" } }],
+        route: [
+          {
+            destination: {
+              host: args.serviceHost,
+              port: { number: args.servicePort },
+            },
+            weight: 100,
+          },
+        ],
+      },
+    ],
+  } as any);
+};
